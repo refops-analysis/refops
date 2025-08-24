@@ -1,0 +1,58 @@
+run-name: "Agents for ${{ inputs.buildNumber }}"
+on:
+  workflow_dispatch:
+    inputs:
+      agentName:
+        description: "The name of the agent."
+        required: false
+        default: ''
+      buildNumber:
+        description: "The requesting pipeline build info (name, build number, url)."
+        required: true
+        default: "unknown"
+      jobCount:
+        description: "Number of requested runners"
+        required: true
+        default: "1"
+      image:
+        description: "The vm image to run the agent with."
+        required: true
+        default: "windows-latest"
+      parallelism:
+        description: "The requesting pipeline build number."
+        required: true
+        default: 0
+        type: number
+      pool:
+        description: "The pool to add the agent."
+        required: true
+      targetAzureRegion:
+        description: "The required azure region (if any)."
+        required: false
+        default: ''
+      taskUrl:
+        description: "The annotated URL for the start-agents InvokeRestAPI task. (value: $(System.CollectionUri)$(System.TeamProject)?buildId=$(Build.BuildId)&jobId=$(System.JobId)&planId=$(System.PlanId)&taskId=$(System.TaskInstanceId)&timelineId=$(System.TimelineId) )"
+        required: false
+        default: ''
+      token:
+        description: "The token to use for the agent."
+        required: false
+        default: ''
+      threadIds:
+        description: "The set of thread ids."
+        required: false
+        default: '[0,1,2,3,4,5,6,7,8,9,10]'
+
+jobs:
+  stage:
+    strategy:
+      max-parallel: ${{ fromJSON(inputs.parallelism) > 0 && fromJSON(inputs.parallelism) || fromJSON(inputs.jobCount)  }}
+      matrix:
+        threadIndex: ${{ fromJSON(inputs.threadIds) }}
+    uses: ./.github/workflows/run-with-agents.thread.yml
+    secrets:
+      token: ${{ inputs.token }}
+    with:
+      env: ${{ toJSON(inputs) }}
+      parallelism: ${{ fromJSON(inputs.parallelism) }}
+      jobIndex: ${{ strategy.job-index }}

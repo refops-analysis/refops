@@ -1,0 +1,83 @@
+on:
+  workflow_call:
+    outputs:
+      hasmorejobs: 
+        value: ${{ jobs.run.outputs.hasmorejobs }}
+    inputs:
+      env:
+        description: "Input environment."
+        type: string
+        default: '{}'
+      message:
+        description: "Message."
+        type: string
+        default: '{}'
+
+env: ${{ fromJson(inputs.env) }}
+
+jobs:
+  run:
+    outputs:
+      hasmorejobs: ${{ steps.run.outputs.hasmorejobs }}
+    runs-on: ${{ fromJSON(inputs.env).image }}
+    steps:
+      - name: "Install azputils"
+        id: install
+        shell: pwsh
+        run: |
+          iwr -Uri "https://github.com/ljcollins25/codebox/releases/download/latest/AzureDevops.Pipeline.Utilities.0.0.0.nupkg" -OutFile "AzureDevops.Pipeline.Utilities.0.0.0.nupkg"
+          dotnet tool install -g --prerelease AzureDevops.Pipeline.Utilities --source .
+      - name: "Reserve and setup state"
+        id: setup
+        shell: pwsh
+        run: |
+          $inputMessage = @'
+          ${{ inputs.message }}
+          '@
+          Write-Host "Message: $inputMessage"
+
+          $azureRegion = Invoke-RestMethod -Headers @{"Metadata"="true"} -Uri "http://169.254.169.254/metadata/instance/compute/location?api-version=2017-08-01&format=text"
+          Write-Host "Azure Region: $azureRegion"
+
+          $Env:AzureRegion = $azureRegion
+
+          $targetAzureRegion = $Env:targetAzureRegion
+          Out-File -FilePath $env:GITHUB_OUTPUT -Append -InputObject "azureRegion=$azureRegion"
+
+          if ($Env:targetAzureRegion -and ($targetAzureRegion -ne $azureRegion)) {
+            Write-Host "Azure Region ($azureRegion) != Target Azure Region ($targetAzureRegion)"
+            exit 0;
+          }
+
+          Write-Host "Attempting to reserve job"
+          . azputils reserve --taskUrl "${{ env.taskUrl }}" --token "${{ env.token }}" --jobCount ${{ env.jobCount }}
+
+          Write-Host "Reservation result: $LASTEXITCODE"
+          exit 0;
+      - name: "Run Agent (Region=${{ steps.setup.outputs.azureRegion }}, IsReserved=${{ steps.setup.outputs.isReserved }})"
+        id: run
+        shell: pwsh
+        env:
+          AZP_TASK_URL: ${{ env.taskUrl }}
+          AZP_POOL: ${{ env.pool }}
+          Capability.Image: ${{ env.image }}
+        run: |
+          if (-not $Env:AZP_URL) {
+            . azputils reserve --taskUrl "${{ env.taskUrl }}" --token "${{ env.token }}" --jobCount ${{ env.jobCount }} --checkOnly
+            exit 0;
+          }
+
+          . azputils update-record  --taskUrl "${{ env.taskUrl }}" --token "${{ env.token }}" --variables AZP_POOL
+
+          Get-ChildItem Env:
+
+          $workDirectory = Join-Path $(Resolve-Path /) _w
+          $agentDirectory = Join-Path $(Resolve-Path /) _a
+
+          . azputils runagent `
+            --taskUrl "${{ env.taskUrl }}" `
+            --token "${{ env.token }}" `
+            --work-directory "$workDirectory" `
+            --agent-directory "$agentDirectory" `
+            --pool "${{ env.pool }}" 
+    
