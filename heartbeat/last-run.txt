@@ -1,0 +1,23 @@
+heartbeat 2026-11-15T07:57:24Z run=43692014202 result=failure
+== JPE
+SUMMARY ghost: blobs=67707 ghosted=0 hydrated=0 failed=0
+duration: 41.1s
+PASS keepalive: last success 2026-11-15T07:51:27.4951549+00:00 by hexad-vps is newer than 2.00:00:00; skipping
+duration: 1.0s
+transactions: total=5 AcquireLease=1 GetProperties=2 ReleaseLease=1 SetMetadata=1
+== WUS2
+ERRORS ghost: RequestFailedException[412/ConditionNotMet]=287
+SUMMARY ghost: blobs=73718 ghosted=322 hydrated=0 failed=287
+duration: 117.8s
+PASS keepalive: held by another runner; nothing to do
+duration: 0.2s
+transactions: total=2 AcquireLease=1 GetProperties=1
+== WUS
+SUMMARY ghost: blobs=1574 ghosted=0 hydrated=0 failed=0
+duration: 1.3s
+SUMMARY keepalive: ghosts=189 due=189 kept_alive=189 not_due=0 legacy_tagged=189 skipped=0 failed=0 stale_over_6d=0 oldest_last_keepalive=2026-11-15T07:57:09.3562571Z oldest_age=0.00d
+RUNNERS keepalive: this=github-refops now=2026-11-15T07:57:09.3562571Z; others: ado_refresh_drives=never; hexad_vps=never
+WARN keepalive: runner ado_refresh_drives has never run: its scheduler may be disabled
+WARN keepalive: runner hexad_vps has never run: its scheduler may be disabled
+duration: 2.9s
+transactions: total=581 AcquireLease=2 FindBlobsByTags=2 GetProperties=2 GetTags=189 PutBlob=1 PutBlock=189 ReleaseLease=1 RenewLease=5 SetMetadata=1 SetTags=189
