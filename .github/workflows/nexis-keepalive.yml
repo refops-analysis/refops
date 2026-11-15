@@ -1,0 +1,108 @@
+# Fallback 2: every 3 hours; only does work when the primary (VPS) and fallback 1 (ADO) have not.
+# PUBLIC LOGS: every nexutils call uses --quiet, which prints counts, durations and runner names only (no blob names, paths, URLs, SAS).
+# Triggers are schedule and workflow_dispatch only: never pull_request, so forks cannot reach the secrets.
+name: nexis-keepalive
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexis-keepalive
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.repository == 'refops-analysis/refops'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      summary: ${{ steps.work.outputs.summary }}
+    steps:
+      - name: Fail visibly when a secret is missing
+        env:
+          JPE: ${{ secrets.MEDIA_JPE_SAS_URL }}
+          WUS2: ${{ secrets.MEDIA_WUS2_SAS_URL }}
+          WUS: ${{ secrets.MEDIA_WUS_SAS_URL }}
+        run: |
+          missing=""
+          [ -n "$JPE" ]  || missing="$missing MEDIA_JPE_SAS_URL"
+          [ -n "$WUS2" ] || missing="$missing MEDIA_WUS2_SAS_URL"
+          [ -n "$WUS" ]  || missing="$missing MEDIA_WUS_SAS_URL"
+          if [ -n "$missing" ]; then echo "::error::Missing repo secrets:$missing"; exit 1; fi
+
+      - name: Download released nexutils from codebox (public release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download latest -R ljcollins25/codebox -p nexutils --dir "$RUNNER_TEMP"
+          chmod +x "$RUNNER_TEMP/nexutils"
+
+      - name: Ghost pass and keep-alive (only if stale, summary-only output)
+        id: work
+        env:
+          MEDIA_JPE_SAS_URL: ${{ secrets.MEDIA_JPE_SAS_URL }}
+          MEDIA_WUS2_SAS_URL: ${{ secrets.MEDIA_WUS2_SAS_URL }}
+          MEDIA_WUS_SAS_URL: ${{ secrets.MEDIA_WUS_SAS_URL }}
+        run: |
+          # no 'set -x': it would echo the URLs
+          set -o pipefail
+          N="$RUNNER_TEMP/nexutils"
+          out="$RUNNER_TEMP/out.txt"; : > "$out"
+          rc=0
+          for name in JPE WUS2 WUS; do
+            var="MEDIA_${name}_SAS_URL"; uri="${!var}"
+            echo "== $name"                      | tee -a "$out"
+            "$N" dehydrate --quiet --uri "$uri" --expiry 20m --min-dehydrate-size 2000000 --keepalive-interval 5d \
+              --runner github-refops --only-if-stale 6h 2>&1 | tee -a "$out" || rc=1
+            "$N" keepalive --quiet --uri "$uri" --keepalive-interval 5d --runner github-refops \
+              --expected-runners hexad-vps ado-refresh-drives --only-if-stale 48h 2>&1 | tee -a "$out" || rc=1
+          done
+          {
+            echo "summary<<EOF_SUMMARY"
+            grep -E '^(== |SUMMARY |RUNNERS |WARN |ERROR |ERRORS |PASS |transactions: |duration: )' "$out" | cut -c1-300
+            echo "EOF_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+          exit $rc
+
+  heartbeat:
+    # Keeps the schedule alive: GitHub disables scheduled workflows in public repos after 60 days without repository activity.
+    if: always() && github.repository == 'refops-analysis/refops'
+    needs: run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the weekly check reads the last heartbeat commit's date from history
+
+      - name: Make sure the workflow stays enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable nexis-keepalive.yml || true
+
+      - name: Weekly heartbeat commit
+        env:
+          SUMMARY: ${{ needs.run.outputs.summary }}
+          RUN_RESULT: ${{ needs.run.result }}
+        run: |
+          mkdir -p heartbeat
+          last=$(git log -1 --format=%ct -- heartbeat/last-run.txt 2>/dev/null || true)
+          last=${last:-0}
+          if [ $(( $(date +%s) - last )) -gt $(( 7*86400 )) ]; then
+            {
+              echo "heartbeat $(date -u +%Y-%m-%dT%H:%M:%SZ) run=${GITHUB_RUN_ID} result=$RUN_RESULT"
+              printf '%s\n' "$SUMMARY"
+            } > heartbeat/last-run.txt
+            git add heartbeat/last-run.txt
+            git -c user.name=nexis-keepalive -c user.email=nexis-keepalive@users.noreply.github.com commit -m "heartbeat $(date -u +%F)"
+            git push
+          fi
