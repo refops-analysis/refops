@@ -58,10 +58,10 @@ jobs:
           for name in JPE WUS2 WUS; do
             var="MEDIA_${name}_SAS_URL"; uri="${!var}"
             echo "== $name"                      | tee -a "$out"
-            "$N" dehydrate --quiet --uri "$uri" --expiry 20m --min-dehydrate-size 2000000 --keepalive-interval 5d \
-              --runner github-refops --only-if-stale 6h 2>&1 | tee -a "$out" || rc=1
             "$N" keepalive --quiet --uri "$uri" --keepalive-interval 5d --runner github-refops \
               --expected-runners hexad-vps ado-refresh-drives --only-if-stale 48h 2>&1 | tee -a "$out" || rc=1
+            "$N" dehydrate --quiet --uri "$uri" --expiry 20m --min-dehydrate-size 2000000 --keepalive-interval 5d \
+              --runner github-refops --only-if-stale 6h 2>&1 | tee -a "$out" || rc=1
           done
           {
             echo "summary<<EOF_SUMMARY"
